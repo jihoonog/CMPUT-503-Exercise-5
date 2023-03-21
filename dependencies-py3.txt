@@ -2,3 +2,5 @@
 # NOTE: only place non-Duckietown libraries here; pin versions only if necessary
 scikit-image
 ruamel_yaml
+torch
+torchvision
