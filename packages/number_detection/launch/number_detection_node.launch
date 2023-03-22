@@ -1,0 +1,8 @@
+<launch>
+
+    <arg name="pkg_name" value="number_detection"/>
+
+
+    <node  name="robot_follower_node" pkg="$(arg pkg_name)" type="robot_follower_node.py" output="screen" ></node>
+    <node  name="apriltag_node" pkg="$(arg pkg_name)" type="apriltag_node.py" output="screen" ></node>
+</launch>
