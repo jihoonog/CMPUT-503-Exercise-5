@@ -11,8 +11,17 @@ import rospy
 import time
 import message_filters
 import typing
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+import torch.utils.data as data
+
 from statistics import mode
 from lane_controller import LaneController
+
+import rospkg
 
 from duckietown.dtros import DTROS, NodeType, TopicType, DTParam, ParamType
 from duckietown_msgs.msg import (
@@ -38,6 +47,41 @@ import rosbag
 VERBOSE = 0
 SIM = False
 
+class MLP(nn.Module):
+    """
+    From the Multilayer Perception (MLP) tutorial notebook
+    """
+    def __init__(self, input_dim, output_dim):
+        super().__init__()
+
+        self.input_fc = nn.Linear(input_dim, 250)
+        self.hidden_fc = nn.Linear(250, 100)
+        self.output_fc = nn.Linear(100, output_dim)
+
+    def forward(self, x):
+
+        # x = [batch size, height, width]
+
+        batch_size = x.shape[0]
+
+        x = x.view(batch_size, -1)
+
+        # x = [batch size, height * width]
+
+        h_1 = F.relu(self.input_fc(x))
+        h_1 = F.dropout(h_1, p=0.1)
+        # h_1 = [batch size, 250]
+
+        h_2 = F.relu(self.hidden_fc(h_1))
+        h_2 = F.dropout(h_2, p=0.1)
+        # h_2 = [batch size, 100]
+
+        y_pred = self.output_fc(h_2)
+
+        # y_pred = [batch size, output dim]
+
+        return y_pred, h_2
+
 
 class NumberDetectionNode(DTROS):
     """
@@ -54,6 +98,7 @@ class NumberDetectionNode(DTROS):
         # Static parameters
         self.update_freq = 10
         self.rate = rospy.Rate(self.update_freq)
+        self.rospack = rospkg.RosPack()
 
         # Publishers
         ## Publish commands to the motors
@@ -76,6 +121,40 @@ class NumberDetectionNode(DTROS):
         self.sub_tag_id = rospy.Subscriber(f"/{self.veh_name}/tag_id", Int32, self.cb_tag_id, queue_size=1)
         
         self.log("Initialized")
+
+    def load_model(self):
+        model_file_folder = self.rospack.get_path('number_detection') + '/config/tut1-model.pt'
+
+    def load_intrinsics(self):
+        # Find the intrinsic calibration parameters
+        # cali_file_folder = '/data/config/calibrations/camera_intrinsic/'
+        # self.frame_id = self.veh + '/camera_optical_frame'
+        # self.cali_file = cali_file_folder + self.veh + ".yaml"
+
+        self.cali_file = self.rospack.get_path('duckiebot_detection') + f"/config/calibrations/camera_intrinsic/{self.veh}.yaml"
+
+        # Locate calibration yaml file or use the default otherwise
+        rospy.loginfo(f'Looking for calibration {self.cali_file}')
+        if not os.path.isfile(self.cali_file):
+            self.logwarn("Calibration not found: %s.\n Using default instead." % self.cali_file)
+            self.cali_file = (cali_file_folder + "default.yaml")
+
+        # Shutdown if no calibration file not found
+        if not os.path.isfile(self.cali_file):
+            rospy.signal_shutdown("Found no calibration file ... aborting")
+
+        # Load the calibration file
+        calib_data = self.readYamlFile2(self.cali_file)
+        self.log("Using calibration file: %s" % self.cali_file)
+
+        return calib_data
+    
+    def get_extrinsic_filepath(self,name):
+        #TODO: retrieve the calibration info from the right path.
+        cali_file_folder = self.rospack.get_path('duckiebot_detection')+'/config/calibrations/camera_extrinsic/'
+
+        cali_file = cali_file_folder + name + ".yaml"
+        return cali_file
 
 if __name__ == '__main__':
     node = NumberDetectionNode(node_name='robot_follower_node')
