@@ -147,19 +147,28 @@ class NumberDetectionNode(DTROS):
         cv2.rectangle(raw_image, (x,y), (x + w, y + h), (0,255,0), 2)
 
         number = raw_image[y:y+h, x:x+w]
-        black_max = np.array([50,50,50])
+        if number is None or mask is None:
+            return
+        black_max = np.array([100,100,100])
         black_min = np.array([0,0,0])
         number_mask = cv2.inRange(number, black_min, black_max)
-        # processed_number = cv2.bitwise_and(number, number_mask)
-        self.pub_processed_image(raw_image)
-        self.pub_processed_image(number_mask)
-    def pub_processed_image(self, image):
+        number_mask = cv2.resize(number_mask, (28,28))
+        self.pub_processed_image(raw_image, self.pub_number_bb)
+        self.pub_processed_image(number_mask, self.pub_cropped_number)
+
+        input_tensor = torch.from_numpy(number_mask).float()
+        input_tensor = input_tensor[None, :]
+        res_vector, _ = self.model(input_tensor)
+        print(res_vector.argmax(1, keepdim=True).item())
+        self.rate.sleep()
+
+    def pub_processed_image(self, image, publisher):
         compressed_image = CompressedImage()
         compressed_image.header.stamp = rospy.Time.now()
         compressed_image.format = "jpeg"
         compressed_image.data = np.array(cv2.imencode('.jpg',image)[1]).tostring()
 
-        self.pub_number_bb.publish(compressed_image)
+        publisher.publish(compressed_image)
 
     def read_params_from_calibration_file(self):
         # Get static parameters
