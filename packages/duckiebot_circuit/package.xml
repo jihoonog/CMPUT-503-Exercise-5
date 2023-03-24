@@ -1,11 +1,11 @@
 <?xml version="1.0"?>
 <package>
-  <name>duckiebot_detection</name>
+  <name>duckiebot_circuit</name>
   <version>1.0.0</version>
-  <description>Start Code for Exercise-4</description>
+  <description>Duckiebot cirucit Exercise-5</description>
 
-  <maintainer email="zepeng@ualberta.ca"> Xiao </maintainer>
-  <author email="zepeng@ualberta.ca"> Xiao </author>
+  <maintainer email="jihoonog@ualberta.ca"> Xiao </maintainer>
+  <author email="jihoonog@ualberta.ca"> Xiao </author>
 
   <license>GPLv3</license>
 

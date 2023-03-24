@@ -214,7 +214,7 @@ class AprilTagNode(DTROS):
         # Convert to grey image and distort it.
         dis = self.augmenter.process_image(self.raw_image)
         new_img = dis
-        if self.frequency_control % 10 == 0:
+        if self.frequency_control % 1 == 0:
 
             tags = self.at_detector.detect(dis, estimate_tag_pose=True, camera_params=self.camera_params, tag_size=0.065) # returns list of detection objects
 
@@ -270,7 +270,7 @@ class AprilTagNode(DTROS):
 
     def get_extrinsic_filepath(self,name):
         #TODO: retrieve the calibration info from the right path.
-        cali_file_folder = self.rospack.get_path('duckiebot_detection')+'/config/calibrations/camera_extrinsic/'
+        cali_file_folder = self.rospack.get_path('duckiebot_circuit')+'/config/calibrations/camera_extrinsic/'
 
         cali_file = cali_file_folder + name + ".yaml"
         return cali_file
@@ -309,7 +309,7 @@ class AprilTagNode(DTROS):
         # self.frame_id = self.veh + '/camera_optical_frame'
         # self.cali_file = cali_file_folder + self.veh + ".yaml"
 
-        self.cali_file = self.rospack.get_path('duckiebot_detection') + f"/config/calibrations/camera_intrinsic/{self.veh}.yaml"
+        self.cali_file = self.rospack.get_path('duckiebot_circuit') + f"/config/calibrations/camera_intrinsic/{self.veh}.yaml"
 
         # Locate calibration yaml file or use the default otherwise
         rospy.loginfo(f'Looking for calibration {self.cali_file}')
