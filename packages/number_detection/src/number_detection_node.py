@@ -97,9 +97,9 @@ class NumberDetectionNode(DTROS):
         if os.environ["VEHICLE_NAME"] is not None:
             self.veh_name = os.environ["VEHICLE_NAME"]
         else:
-            self.veh_name = "csc22945"
+            self.veh_name = "csc22935"
 
-        self.model = MLP(28*28, 10)
+        #self.model = MLP(28*28, 10)
         self.model = Net()
     
         self.rospack = rospkg.RosPack()
@@ -130,7 +130,7 @@ class NumberDetectionNode(DTROS):
         ## Subscribe to the lane_pose node
         self.sub_images = rospy.Subscriber(f"/{self.veh_name}/camera_node/image/compressed", CompressedImage, self.cb_image, queue_size=1)
         self.sub_apriltag_id = rospy.Subscriber(f'/{self.veh_name}/tag_id', Int32, self.detect_apriltag_existance,queue_size=1)
-        self.apriltag_exist = False
+        self.apriltag_exist = -1
         self.tag_figure_dict = {}
         self.load_model()
                 # Publishers
@@ -145,7 +145,7 @@ class NumberDetectionNode(DTROS):
         return max(set(new_list), key=new_list.count)
 
     def detect_apriltag_existance(self, msg):
-        print("msg",msg.data)
+        #print("msg",msg.data)
         data = msg.data
         if data != -1:
             self.apriltag_exist = msg.data
@@ -154,7 +154,7 @@ class NumberDetectionNode(DTROS):
         else:
             self.apriltag_exist = -1
         
-        self.rate.sleep()
+        #self.rate.sleep()
 
     def shutdown(self):
         motor_cmd = WheelsCmdStamped()
@@ -169,11 +169,12 @@ class NumberDetectionNode(DTROS):
         self.pub_car_cmd.publish(car_control_msg)
 
     def cb_image(self, msg):
+        #print("in cb_image")
         br = CvBridge()
         # Convert image to cv2
         raw_image = br.compressed_imgmsg_to_cv2(msg)
         # processed_image = self.augmenter.process_image(raw_image)
-        if len(self.figure_decision_queue) == 2:
+        if len(self.figure_list) == 10:
             self.shutdown()
             time.sleep(2)
             exit()
@@ -181,9 +182,14 @@ class NumberDetectionNode(DTROS):
         if self.apriltag_exist != -1:
             rangomax = np.array([255,175,50]) # B,G,R
             rangomin = np.array([60,60,0])
-            mask = cv2.inRange(raw_image, rangomin, rangomax)
+            try:
+                mask = cv2.inRange(raw_image, rangomin, rangomax)
+            except Exception:
+                self.pub_processed_image(raw_image, self.pub_number_bb)
+                #print("range:",rangomin, rangomax)
+                return
             # reduce the noise
-            opening = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5,5),np.uint8), iterations = 2)
+            opening = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((2,2),np.uint8), iterations = 3)
             x,y,w,h = cv2.boundingRect(opening)
 
             cv2.rectangle(raw_image, (x,y), (x + w, y + h), (0,255,0), 2)
@@ -193,7 +199,14 @@ class NumberDetectionNode(DTROS):
                 return
             black_max = np.array([100,100,100])
             black_min = np.array([0,0,0])
-            number_mask = cv2.inRange(number, black_min, black_max)
+
+            try:
+                number_mask = cv2.inRange(number, black_min, black_max)
+
+            except Exception:
+                #print("range2:",rangomin, rangomax)
+                self.pub_processed_image(raw_image, self.pub_number_bb)
+                return
             number_mask = cv2.resize(number_mask, (28,28))
 
 
@@ -213,15 +226,16 @@ class NumberDetectionNode(DTROS):
                         new_list.append(i)
                 self.figure_decision_queue = new_list
 
-            print(self.tag_figure_dict)
+            
             # If we have enough history to look at and the april tag we detected has no corresponding figure:
-            if len(self.figure_decision_queue) >=20 and self.tag_figure_dict[self.apriltag_exist] == -1:
+            if len(self.figure_decision_queue) >=5 and self.tag_figure_dict[self.apriltag_exist] == -1:
                 decision = self.most_common(self.figure_decision_queue)
                 print(self.figure_decision_queue)
                 print("decision",decision)
+                print(self.tag_figure_dict)
 
                 self.tag_figure_dict[self.apriltag_exist] = decision
-                rospy.sleep(3)
+                #rospy.sleep(3)
                 self.figure_decision_queue = []
                 if decision not in self.figure_list:
                     self.figure_list.append(decision)

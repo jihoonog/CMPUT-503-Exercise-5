@@ -143,7 +143,7 @@ class RobotCircuitNode(DTROS):
         self.process_stop_line(at_stop_line)
 
     def cb_lane_pose(self, input_pose_msg):
-        print("cb_lane")
+        #print("cb_lane")
         self.lane_pose = input_pose_msg
         self.get_control_action(self.lane_pose)
 
@@ -191,7 +191,7 @@ class RobotCircuitNode(DTROS):
         curr_time = rospy.get_time()
 
         stop_time_diff = curr_time - self.stop_time
-        print("here")
+
         if (self.cmd_stop and stop_time_diff > self.stop_cooldown):
             self.stop_time = curr_time
             v = 0.0

@@ -54,7 +54,6 @@ class StopLineFilterNode(DTROS):
         self.lane_pose = lane_pose_msg
 
     def cb_segments(self, segment_list_msg):
-        print("cb_segments")
 
         good_seg_count = 0
         stop_line_x_accumulator = 0.0

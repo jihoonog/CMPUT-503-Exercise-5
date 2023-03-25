@@ -19,7 +19,7 @@ from duckietown_msgs.srv import SetCustomLEDPattern, ChangePattern
 import math
 import geometry_msgs.msg
 import tf
-from std_msgs.msg import Header, Float32, String, Float64MultiArray, Float32MultiArray, Int32
+from std_msgs.msg import Header, Float32, String, Float64MultiArray,Float32MultiArray,Int32
 import tf2_ros
 
 
@@ -37,10 +37,12 @@ class AprilTagNode(DTROS):
         # Initialize the DTROS parent class
         super(AprilTagNode, self).__init__(node_name=node_name, node_type=NodeType.PERCEPTION)
         if os.environ["VEHICLE_NAME"] is not None:
-            self.veh = os.environ["VEHICLE_NAME"]
+            self.veh= os.environ["VEHICLE_NAME"]
         else:
-            self.veh = "csc22945"
+            self.veh = "csc22935"
+
         self.rospack = rospkg.RosPack()
+
         self.read_params_from_calibration_file()
         # Get parameters from config
         self.camera_info_dict = self.load_intrinsics()
@@ -48,15 +50,18 @@ class AprilTagNode(DTROS):
         self.tmp_broadcaster = tf2_ros.StaticTransformBroadcaster()
 
         self.augmenter = Augmenter(self.homography,self.camera_info_msg)    
+        self.pub_change_odometry = rospy.Publisher(f'/{self.veh}/change_odometry', Float32MultiArray, queue_size=10)    
         # Subscribing 
         self.sub_image = rospy.Subscriber( f'/{self.veh}/camera_node/image/compressed',CompressedImage,self.project, queue_size=1)
         
         # Publisher
+        self.pub_result_ = rospy.Publisher(f'/{self.veh}/apriltag_node/modified/image/compressed', CompressedImage,queue_size=10)
         # Keep this state so you don't need to reset the same color over and over again.
-        self.pub_tag_id = rospy.Publisher(f'/{self.veh}/tag_id', Int32, queue_size=1)
         self.current_led_pattern = 4
+        self.pub_tag_id = rospy.Publisher(f'/{self.veh}/tag_id', Int32, queue_size=1)
 
         self.frequency_control = 0
+        self.sub_odom = rospy.Subscriber(f"/{self.veh}/deadreckoning_node/odom", Odometry, self.get_odom_location, queue_size=1)
         
         # extract parameters from camera_info_dict for apriltag detection
         f_x = self.camera_info_dict['camera_matrix']['data'][0]
@@ -77,6 +82,10 @@ class AprilTagNode(DTROS):
                            decode_sharpening=0.25,
                            debug=0)
 
+        serve_name = f"{self.veh}/led_emitter_node/set_custom_pattern"
+        rospy.wait_for_service(serve_name)
+
+        #self.emitter_service = rospy.ServiceProxy(serve_name, SetCustomLEDPattern,persistent=True)
         self.r = rospy.Rate(30) # 30hz
 
         #rospy.init_node('static_tf2_broadcaster_tag')
@@ -99,6 +108,51 @@ class AprilTagNode(DTROS):
         self.fusion_y = data.position.y
         self.fusion_z = data.position.z
         self.fusion_rotation_z = data.orientation.z
+
+
+
+    def color_pattern(self,mode):
+        msg = LEDPattern()
+        if mode == 1:
+            msg.color_list = ['red', 'red', 'red', 'red', 'red']
+            msg.color_mask = [0, 0, 0, 0, 0]
+            msg.frequency = 0
+            msg.frequency_mask = [0, 0, 0, 0, 0]
+        elif mode==2:
+            msg.color_list = ['blue', 'blue', 'blue', 'blue', 'blue']
+            msg.color_mask = [0, 0, 0, 0, 0]
+            msg.frequency = 0
+            msg.frequency_mask = [0, 0, 0, 0, 0]
+        elif mode==3:
+            msg.color_list = ['green', 'green', 'green', 'green', 'green']
+            msg.color_mask = [0, 0, 0, 0, 0]
+            msg.frequency = 0
+            msg.frequency_mask = [0, 0, 0, 0, 0]
+        elif mode==4:
+            msg.color_list = ['white', 'white', 'white', 'white', 'white']
+            msg.color_mask = [0, 0, 0, 0, 0]
+            msg.frequency = 0
+            msg.frequency_mask = [0, 0, 0, 0, 0]
+
+        return msg
+
+    def change_led(self, tag_id):
+        tag_id = int(tag_id)
+        if tag_id in [63, 143, 58, 62, 133, 153]:
+            # T-intersection
+            if self.current_led_pattern != 2:
+                self.emitter_service(self.color_pattern(2))
+                self.current_led_pattern = 2
+        elif tag_id in [162,169]:
+            # Stop sign
+            if self.current_led_pattern != 1:
+                self.emitter_service(self.color_pattern(1))
+                self.current_led_pattern = 1
+        elif tag_id in [93,94,200,201]:
+            # U of A sign
+            if self.current_led_pattern != 3:
+                self.emitter_service(self.color_pattern(3))
+                self.current_led_pattern =3
 
     def draw_boundary(self,corners, image):
         """
@@ -139,7 +193,7 @@ class AprilTagNode(DTROS):
             # U of A sign
             text = "U of A"
 
-        print(text)
+
         cv2.putText(img,text, 
             (int(center[0]),int(center[1])), 
             font, 
@@ -224,7 +278,10 @@ class AprilTagNode(DTROS):
             
             if len(tags) == 0:
                 # Means there's no tags present. Set the led to white.
-                self.pub_tag_id.publish(-1)    
+                if self.current_led_pattern != 4:
+                    #self.emitter_service(self.color_pattern(4))
+                    self.current_led_pattern = 4
+                
             else:
                 distance_list = []
                 tag_list = []
@@ -253,12 +310,105 @@ class AprilTagNode(DTROS):
                     self.transform_camera_view(tag.pose_t,tag.pose_R)
                     # Now here you can get the ground truth location and yaw, use it to modify your odometry.
                     tag_name = tag.tag_id
-                    self.pub_tag_id.publish(tag_name)
+                    frame_name = f"{tag_name}_static"
+                    #print(frame_name)
+                    """
+                    transform: 
+                        translation: 
+                            x: 0.17
+                            y: 2.84
+                            z: 0.085
+                        rotation: 
+                            x: -0.6530213399855402
+                            y: -0.27049023303646824
+                            z: 0.2707057174661928
+                            w: 0.6535415655384748
+                    """
+                    apriltag_trans = self.buffer.lookup_transform(f"{self.veh}/world",f"{frame_name}",time=rospy.Time.now(),timeout=rospy.Duration(1.0))
+                    #print(apriltag_trans)
+
+                    actual_x = apriltag_trans.transform.translation.x
+                    actual_y = apriltag_trans.transform.translation.y
+                    actual_z = apriltag_trans.transform.translation.z
+                    #actual_x = apriltag_trans.translation.x
+                    try:
+                        trans = self.buffer.lookup_transform(f"{self.veh}/new_location",f"{self.veh}/footprint",time=rospy.Time.now(),timeout=rospy.Duration(1.0))
+                        #print(trans)
+                        """
+                        transform: 
+                        translation: 
+                            x: -0.39698858166459905
+                            y: -1.2703165252412707
+                            z: 0.085
+                        rotation: 
+                            x: -0.49999982836333756
+                            y: 0.4996018497576509
+                            z: -0.49999985458938123
+                            w: 0.5003981502423488
+                        
+                        
+                        """
+                        self.combine_trans(frame_name, trans)
+                        # trans_x = trans.transform.translation.x
+                        # trans_y = trans.transform.translation.y
+                        # trans_z = trans.transform.translation.z
+                        # print("trans:",trans_x,trans_y,trans_z)
+
+                        # actual_x += trans_x
+                        # actual_y += trans_y
+                        # actual_z += trans_z
+
+
+                        final = self.buffer.lookup_transform(f"{self.veh}/world",f"{self.veh}/calibrated_location",time=rospy.Time.now(),timeout=rospy.Duration(1.0))
+                        #print(final)
+                    
+                        """
+                            x: 0.6669450351163856
+                            y: 3.4568548560895924
+                            z: 0.3497790815858113
+                        rotation: 
+                            x: -0.6659731145535472
+                            y: -0.2758550324796435
+                            z: -0.6401185037625119
+                            w: 0.265767027466437
+                        """
+                        trans = final.transform.translation
+                        rotation = final.transform.rotation
+                        new_array = Float32MultiArray()
+                        new_array.data = [trans.x,trans.y,trans.z,rotation.x,rotation.y, rotation.z,rotation.w]
+
+                        # self.fusion_x = actual_x
+                        # self.fusion_y = actual_y
+                        # self.fusion_z = actual_z
+                        # self.fusion_rotation_z = 1.57
+
+
+                        self.pub_change_odometry.publish(new_array)
+                        self.pub_tag_id.publish(tag_name)
+
+                        #print(distance_list)
+
+                        new_img = dis
+                        #new_img = self.draw_boundary(tag.corners, new_img)
+
+                        # Add text to the center of the box.
+                        #new_img = self.add_text_to_img(tag.tag_id, tag.center, new_img)
+                        #self.change_led(tag.tag_id)
+                    except Exception as e:
+                        print(e)
+
+                else:
+                    self.pub_tag_id.publish(-1)
 
         self.frequency_control +=1
         # make new CompressedImage to publish
+        augmented_image_msg = CompressedImage()
+        augmented_image_msg.header.stamp = rospy.Time.now()
+        augmented_image_msg.format = "jpeg"
+        augmented_image_msg.data = np.array(cv2.imencode('.jpg', new_img)[1]).tostring()
         #render = self.augmenter.render_segments(points=self._points, img=dis, segments=self._segments)
         #result = br.cv2_to_compressed_imgmsg(render,dst_format='jpg')
+        self.pub_result_.publish(augmented_image_msg)
         self.r.sleep()
 
     def read_params_from_calibration_file(self):
