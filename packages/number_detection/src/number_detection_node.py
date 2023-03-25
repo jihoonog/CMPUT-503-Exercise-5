@@ -189,7 +189,7 @@ class NumberDetectionNode(DTROS):
                 #print("range:",rangomin, rangomax)
                 return
             # reduce the noise
-            opening = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((2,2),np.uint8), iterations = 3)
+            opening = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5,5),np.uint8), iterations = 2)
             x,y,w,h = cv2.boundingRect(opening)
 
             cv2.rectangle(raw_image, (x,y), (x + w, y + h), (0,255,0), 2)
