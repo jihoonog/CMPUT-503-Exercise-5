@@ -45,7 +45,7 @@ from sensor_msgs.msg import CompressedImage, CameraInfo
 from geometry_msgs.msg import Point32
 
 import rosbag
-
+from CNN import Net
 
 # Change this before executing
 VERBOSE = 0
@@ -100,10 +100,13 @@ class NumberDetectionNode(DTROS):
             self.veh_name = "csc22945"
 
         self.model = MLP(28*28, 10)
+        self.model = Net()
     
         self.rospack = rospkg.RosPack()
         self.read_params_from_calibration_file()
         self.camera_info_dict = self.load_intrinsics()
+        self.figure_list = []
+        self.figure_decision_queue = []
 
         # extract parameters from camera_info_dict for apriltag detection
         f_x = self.camera_info_dict['camera_matrix']['data'][0]
@@ -126,40 +129,113 @@ class NumberDetectionNode(DTROS):
         # Subscribers
         ## Subscribe to the lane_pose node
         self.sub_images = rospy.Subscriber(f"/{self.veh_name}/camera_node/image/compressed", CompressedImage, self.cb_image, queue_size=1)
-        
+        self.sub_apriltag_id = rospy.Subscriber(f'/{self.veh_name}/tag_id', Int32, self.detect_apriltag_existance,queue_size=1)
+        self.apriltag_exist = False
+        self.tag_figure_dict = {}
         self.load_model()
+                # Publishers
+        ## Publish commands to the motors
+        self.pub_motor_commands = rospy.Publisher(f'/{self.veh_name}/wheels_driver_node/wheels_cmd', WheelsCmdStamped, queue_size=1)
+        self.pub_car_cmd = rospy.Publisher(f'/{self.veh_name}/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1, dt_topic_type=TopicType.CONTROL)
 
         self.log("Initialized")
+
+    def most_common(self,lst):
+        new_list = [i for i in lst if i not in self.figure_list]
+        return max(set(new_list), key=new_list.count)
+
+    def detect_apriltag_existance(self, msg):
+        print("msg",msg.data)
+        data = msg.data
+        if data != -1:
+            self.apriltag_exist = msg.data
+            if data not in list(self.tag_figure_dict.keys()):
+                self.tag_figure_dict[data] = -1
+        else:
+            self.apriltag_exist = -1
+        
+        self.rate.sleep()
+
+    def shutdown(self):
+        motor_cmd = WheelsCmdStamped()
+        motor_cmd.header.stamp = rospy.Time.now()
+        motor_cmd.vel_left = 0.0
+        motor_cmd.vel_right = 0.0
+        self.pub_motor_commands.publish(motor_cmd)
+        car_control_msg = Twist2DStamped()
+        car_control_msg.header.stamp = rospy.Time.now()
+        car_control_msg.v - 0.0
+        car_control_msg.omega = 0.0
+        self.pub_car_cmd.publish(car_control_msg)
 
     def cb_image(self, msg):
         br = CvBridge()
         # Convert image to cv2
         raw_image = br.compressed_imgmsg_to_cv2(msg)
         # processed_image = self.augmenter.process_image(raw_image)
+        if len(self.figure_decision_queue) == 2:
+            self.shutdown()
+            time.sleep(2)
+            exit()
 
-        rangomax = np.array([255,175,50]) # B,G,R
-        rangomin = np.array([60,60,0])
-        mask = cv2.inRange(raw_image, rangomin, rangomax)
-        # reduce the noise
-        opening = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5,5),np.uint8), iterations = 2)
-        x,y,w,h = cv2.boundingRect(opening)
+        if self.apriltag_exist != -1:
+            rangomax = np.array([255,175,50]) # B,G,R
+            rangomin = np.array([60,60,0])
+            mask = cv2.inRange(raw_image, rangomin, rangomax)
+            # reduce the noise
+            opening = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5,5),np.uint8), iterations = 2)
+            x,y,w,h = cv2.boundingRect(opening)
 
-        cv2.rectangle(raw_image, (x,y), (x + w, y + h), (0,255,0), 2)
+            cv2.rectangle(raw_image, (x,y), (x + w, y + h), (0,255,0), 2)
 
-        number = raw_image[y:y+h, x:x+w]
-        if number is None or mask is None:
-            return
-        black_max = np.array([100,100,100])
-        black_min = np.array([0,0,0])
-        number_mask = cv2.inRange(number, black_min, black_max)
-        number_mask = cv2.resize(number_mask, (28,28))
+            number = raw_image[y:y+h, x:x+w]
+            if number is None or mask is None:
+                return
+            black_max = np.array([100,100,100])
+            black_min = np.array([0,0,0])
+            number_mask = cv2.inRange(number, black_min, black_max)
+            number_mask = cv2.resize(number_mask, (28,28))
+
+
+            input_tensor = torch.from_numpy(number_mask).float()
+            input_tensor = input_tensor[None, :]
+            #print("input_tensor",input_tensor.shape)
+            #print("input_tensor",input_tensor)
+            res_vector = self.model(input_tensor)
+            #print("res_vector",res_vector)
+            figure_decision = res_vector.argmax(1, keepdim=True).item()
+
+            self.figure_decision_queue.append(figure_decision)
+            if self.figure_decision_queue != []:
+                new_list = []
+                for i in self.figure_decision_queue:
+                    if i not in self.figure_list:
+                        new_list.append(i)
+                self.figure_decision_queue = new_list
+
+            print(self.tag_figure_dict)
+            # If we have enough history to look at and the april tag we detected has no corresponding figure:
+            if len(self.figure_decision_queue) >=20 and self.tag_figure_dict[self.apriltag_exist] == -1:
+                decision = self.most_common(self.figure_decision_queue)
+                print(self.figure_decision_queue)
+                print("decision",decision)
+
+                self.tag_figure_dict[self.apriltag_exist] = decision
+                rospy.sleep(3)
+                self.figure_decision_queue = []
+                if decision not in self.figure_list:
+                    self.figure_list.append(decision)
+
+
+            
+
+            print(self.figure_list)
+            self.pub_processed_image(number_mask, self.pub_cropped_number)
+
         self.pub_processed_image(raw_image, self.pub_number_bb)
-        self.pub_processed_image(number_mask, self.pub_cropped_number)
+        
+            
 
-        input_tensor = torch.from_numpy(number_mask).float()
-        input_tensor = input_tensor[None, :]
-        res_vector, _ = self.model(input_tensor)
-        print(res_vector.argmax(1, keepdim=True).item())
         self.rate.sleep()
 
     def pub_processed_image(self, image, publisher):
@@ -178,8 +254,10 @@ class NumberDetectionNode(DTROS):
 
 
     def load_model(self):
-        model_file_folder = self.rospack.get_path('number_detection') + '/config/MNIST_model.pt'
-        self.model.load_state_dict(torch.load(model_file_folder, map_location=torch.device('cpu')))
+        #model_file_folder = self.rospack.get_path('number_detection') + '/config/MNIST_model.pt'
+        model_file_folder = self.rospack.get_path('number_detection') + '/config/mnist_cnn0.pt'
+        self.model.load_state_dict(torch.load(model_file_folder))
+        #self.model.load_state_dict(torch.load(model_file_folder, map_location=torch.device('cpu')))
         self.model.eval()
 
     def load_intrinsics(self):
@@ -188,7 +266,7 @@ class NumberDetectionNode(DTROS):
         # self.frame_id = self.veh_name + '/camera_optical_frame'
         # self.cali_file = cali_file_folder + self.veh_name + ".yaml"
 
-        self.cali_file = self.rospack.get_path('duckiebot_detection') + f"/config/calibrations/camera_intrinsic/{self.veh_name}.yaml"
+        self.cali_file = self.rospack.get_path('number_detection') + f"/config/calibrations/camera_intrinsic/{self.veh_name}.yaml"
 
         # Locate calibration yaml file or use the default otherwise
         rospy.loginfo(f'Looking for calibration {self.cali_file}')
@@ -208,7 +286,7 @@ class NumberDetectionNode(DTROS):
     
     def get_extrinsic_filepath(self,name):
         #TODO: retrieve the calibration info from the right path.
-        cali_file_folder = self.rospack.get_path('duckiebot_detection')+'/config/calibrations/camera_extrinsic/'
+        cali_file_folder = self.rospack.get_path('number_detection')+'/config/calibrations/camera_extrinsic/'
 
         cali_file = cali_file_folder + name + ".yaml"
         return cali_file

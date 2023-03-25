@@ -270,7 +270,7 @@ class AprilTagNode(DTROS):
 
     def get_extrinsic_filepath(self,name):
         #TODO: retrieve the calibration info from the right path.
-        cali_file_folder = self.rospack.get_path('duckiebot_detection')+'/config/calibrations/camera_extrinsic/'
+        cali_file_folder = self.rospack.get_path('number_detection')+'/config/calibrations/camera_extrinsic/'
 
         cali_file = cali_file_folder + name + ".yaml"
         return cali_file
@@ -309,7 +309,7 @@ class AprilTagNode(DTROS):
         # self.frame_id = self.veh + '/camera_optical_frame'
         # self.cali_file = cali_file_folder + self.veh + ".yaml"
 
-        self.cali_file = self.rospack.get_path('duckiebot_detection') + f"/config/calibrations/camera_intrinsic/{self.veh}.yaml"
+        self.cali_file = self.rospack.get_path('number_detection') + f"/config/calibrations/camera_intrinsic/{self.veh}.yaml"
 
         # Locate calibration yaml file or use the default otherwise
         rospy.loginfo(f'Looking for calibration {self.cali_file}')

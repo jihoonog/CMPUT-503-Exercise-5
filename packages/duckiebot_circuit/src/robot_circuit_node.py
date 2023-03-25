@@ -104,7 +104,7 @@ class RobotCircuitNode(DTROS):
         ## Subscribe to the lane_pose node
         self.sub_lane_reading = rospy.Subscriber(f"/{self.veh_name}/lane_filter_node/lane_pose", LanePose, self.cb_lane_pose, queue_size = 1)
         self.sub_segment_list = rospy.Subscriber(f"/{self.veh_name}/line_detector_node/segment_list", SegmentList, self.cb_segments, queue_size=1)
-        self.sub_tag_id = rospy.Subscriber(f"/{self.veh_name}/tag_id", Int32, self.cb_tag_id, queue_size=1)
+        #self.sub_tag_id = rospy.Subscriber(f"/{self.veh_name}/tag_id", Int32, self.cb_tag_id, queue_size=1)
         
         self.log("Initialized")
 
@@ -143,6 +143,7 @@ class RobotCircuitNode(DTROS):
         self.process_stop_line(at_stop_line)
 
     def cb_lane_pose(self, input_pose_msg):
+        print("cb_lane")
         self.lane_pose = input_pose_msg
         self.get_control_action(self.lane_pose)
 
@@ -190,7 +191,7 @@ class RobotCircuitNode(DTROS):
         curr_time = rospy.get_time()
 
         stop_time_diff = curr_time - self.stop_time
-
+        print("here")
         if (self.cmd_stop and stop_time_diff > self.stop_cooldown):
             self.stop_time = curr_time
             v = 0.0

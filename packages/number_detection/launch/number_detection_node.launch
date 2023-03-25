@@ -1,6 +1,7 @@
 <launch>
 
     <arg name="pkg_name" value="number_detection"/>
+    <node  name="apriltag_node" pkg="$(arg pkg_name)" type="apriltag_node.py" output="screen" ></node>
 
     <node  name="number_detection_node" pkg="$(arg pkg_name)" type="number_detection_node.py" output="screen" ></node>
 </launch>
