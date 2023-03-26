@@ -101,6 +101,7 @@ class NumberDetectionNode(DTROS):
 
         #self.model = MLP(28*28, 10)
         self.model = Net()
+        self.new_model = Net()
     
         self.rospack = rospkg.RosPack()
         self.read_params_from_calibration_file()
@@ -132,6 +133,7 @@ class NumberDetectionNode(DTROS):
         self.sub_apriltag_id = rospy.Subscriber(f'/{self.veh_name}/tag_id', Int32, self.detect_apriltag_existance,queue_size=1)
         self.apriltag_exist = -1
         self.tag_figure_dict = {}
+        self.tag_history_list = {}
         self.load_model()
                 # Publishers
         ## Publish commands to the motors
@@ -139,10 +141,13 @@ class NumberDetectionNode(DTROS):
         self.pub_car_cmd = rospy.Publisher(f'/{self.veh_name}/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1, dt_topic_type=TopicType.CONTROL)
 
         self.log("Initialized")
+        self.apriltag_locations = {200:(0.17,0.17), 201:(1.65, 0.17), 
+                                    94:(1.65, 2.84),93:(0.17, 2.84),153:(1.75, 1.252), 
+                                    133:(1.253, 1.755),58:(0.574, 1.259),62: (0.075, 1.755),
+                                    169:(0.574, 1.755), 162:(1.253, 1.253)}
 
     def most_common(self,lst):
-        new_list = [i for i in lst if i not in self.figure_list]
-        return max(set(new_list), key=new_list.count)
+        return max(set(lst), key=lst.count)
 
     def detect_apriltag_existance(self, msg):
         #print("msg",msg.data)
@@ -173,80 +178,80 @@ class NumberDetectionNode(DTROS):
         br = CvBridge()
         # Convert image to cv2
         raw_image = br.compressed_imgmsg_to_cv2(msg)
+        copy_raw = raw_image
+        #raw_image = cv2.cvtColor(raw_image, cv2.COLOR_BGR2GRAY)
+        
         # processed_image = self.augmenter.process_image(raw_image)
-        if len(self.figure_list) == 10:
+
+        if len(list(self.figure_decision_queue)) == 10:
+            print(self.figure_decision_queue)
             self.shutdown()
             time.sleep(2)
             exit()
+        
+
+            
+
+        
+        #raw_image = br.compressed_imgmsg_to_cv2(msg)
+        # processed_image = self.augmenter.process_image(raw_image)
+
+        rangomax = np.array([255,175,50]) # B,G,R
+        rangomin = np.array([60,60,0])
+        mask = cv2.inRange(raw_image, rangomin, rangomax)
+        # reduce the noise
+        opening = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5,5),np.uint8), iterations = 2)
+        x,y,w,h = cv2.boundingRect(opening)
+
+        cv2.rectangle(raw_image, (x,y), (x + w, y + h), (0,255,0), 2)
+
+        number = raw_image[y:y+h, x:x+w]
+        if number is None or mask is None or w<50 or h < 50:
+            self.pub_processed_image(copy_raw, self.pub_number_bb)
+            return
+        black_max = np.array([100,100,100])
+        black_min = np.array([0,0,0])
+        number_mask = cv2.inRange(number, black_min, black_max)
+        number_mask = cv2.resize(number_mask, (28,28))
+        self.pub_processed_image(raw_image, self.pub_number_bb)
+        self.pub_processed_image(number_mask, self.pub_cropped_number)
+
+
+        input_tensor = torch.from_numpy(number_mask).float()
+        input_tensor = input_tensor[None, :]
+        #print("input_tensor",input_tensor.shape)
+        #print("input_tensor",input_tensor)
+        res_vector = self.model(input_tensor)
+        #print("res_vector",res_vector)
+        figure_decision = res_vector.argmax(1, keepdim=True).item()
+
+        # The old model can not compare 3/5 and 1/7 well, so we use a new model to do that.
+        if figure_decision == 1:
+            figure_decision = self.new_model(input_tensor).argmax(1, keepdim=True).item()
+
+        elif figure_decision == 3 or figure_decision == 5:
+            figure_decision = self.new_model(input_tensor).argmax(1, keepdim=True).item()
+
+
 
         if self.apriltag_exist != -1:
-            rangomax = np.array([255,175,50]) # B,G,R
-            rangomin = np.array([60,60,0])
-            try:
-                mask = cv2.inRange(raw_image, rangomin, rangomax)
-            except Exception:
-                self.pub_processed_image(raw_image, self.pub_number_bb)
-                #print("range:",rangomin, rangomax)
-                return
-            # reduce the noise
-            opening = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5,5),np.uint8), iterations = 2)
-            x,y,w,h = cv2.boundingRect(opening)
+            if self.apriltag_exist in list(self.tag_history_list.keys()):
+                self.tag_history_list[self.apriltag_exist].append(figure_decision)
+                frequent_detection = self.most_common(self.tag_history_list[self.apriltag_exist])
+                self.tag_figure_dict[self.apriltag_exist] = frequent_detection
 
-            cv2.rectangle(raw_image, (x,y), (x + w, y + h), (0,255,0), 2)
+            else:
+                self.tag_history_list[self.apriltag_exist] = [figure_decision]
+                self.tag_figure_dict[self.apriltag_exist] = figure_decision
 
-            number = raw_image[y:y+h, x:x+w]
-            if number is None or mask is None:
-                return
-            black_max = np.array([100,100,100])
-            black_min = np.array([0,0,0])
-
-            try:
-                number_mask = cv2.inRange(number, black_min, black_max)
-
-            except Exception:
-                #print("range2:",rangomin, rangomax)
-                self.pub_processed_image(raw_image, self.pub_number_bb)
-                return
-            number_mask = cv2.resize(number_mask, (28,28))
-
-
-            input_tensor = torch.from_numpy(number_mask).float()
-            input_tensor = input_tensor[None, :]
-            #print("input_tensor",input_tensor.shape)
-            #print("input_tensor",input_tensor)
-            res_vector = self.model(input_tensor)
-            #print("res_vector",res_vector)
-            figure_decision = res_vector.argmax(1, keepdim=True).item()
-
-            self.figure_decision_queue.append(figure_decision)
-            if self.figure_decision_queue != []:
-                new_list = []
-                for i in self.figure_decision_queue:
-                    if i not in self.figure_list:
-                        new_list.append(i)
-                self.figure_decision_queue = new_list
-
+            if self.tag_figure_dict[self.apriltag_exist] not in self.figure_decision_queue:
+                self.figure_decision_queue.append(self.tag_figure_dict[self.apriltag_exist])
             
-            # If we have enough history to look at and the april tag we detected has no corresponding figure:
-            if len(self.figure_decision_queue) >=5 and self.tag_figure_dict[self.apriltag_exist] == -1:
-                decision = self.most_common(self.figure_decision_queue)
-                print(self.figure_decision_queue)
-                print("decision",decision)
-                print(self.tag_figure_dict)
+            print(f"detection: tag {self.apriltag_exist}, figure {self.tag_figure_dict[self.apriltag_exist]} location:{self.apriltag_locations[self.apriltag_exist]}")
+            print("current visited numbers",self.figure_decision_queue)
+        # self.pub_processed_image(number_mask, self.pub_cropped_number)
 
-                self.tag_figure_dict[self.apriltag_exist] = decision
-                #rospy.sleep(3)
-                self.figure_decision_queue = []
-                if decision not in self.figure_list:
-                    self.figure_list.append(decision)
-
-
-            
-
-            print(self.figure_list)
-            self.pub_processed_image(number_mask, self.pub_cropped_number)
-
-        self.pub_processed_image(raw_image, self.pub_number_bb)
+        # self.pub_processed_image(raw_image, self.pub_number_bb)
         
             
 
@@ -269,10 +274,19 @@ class NumberDetectionNode(DTROS):
 
     def load_model(self):
         #model_file_folder = self.rospack.get_path('number_detection') + '/config/MNIST_model.pt'
+        #model_file_folder = self.rospack.get_path('number_detection') + '/config/mnist_cnn0.pt'
+        
         model_file_folder = self.rospack.get_path('number_detection') + '/config/mnist_cnn0.pt'
+
         self.model.load_state_dict(torch.load(model_file_folder))
         #self.model.load_state_dict(torch.load(model_file_folder, map_location=torch.device('cpu')))
         self.model.eval()
+
+        model_file_folder = self.rospack.get_path('number_detection') + '/config/mnist_cnn_add_data_aug_5.pt'
+
+        self.new_model.load_state_dict(torch.load(model_file_folder))
+        #self.model.load_state_dict(torch.load(model_file_folder, map_location=torch.device('cpu')))
+        self.new_model.eval()
 
     def load_intrinsics(self):
         # Find the intrinsic calibration parameters
