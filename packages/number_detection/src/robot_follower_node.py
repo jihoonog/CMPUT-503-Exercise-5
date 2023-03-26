@@ -125,7 +125,8 @@ class RobotFollowerNode(DTROS):
         self.sub_circle_pattern_image = rospy.Subscriber(f"/{self.veh_name}/duckiebot_detection_node/detection_image/compressed", CompressedImage, queue_size=1)
         self.sub_detection = rospy.Subscriber(f"/{self.veh_name}/duckiebot_detection_node/detection", BoolStamped, self.cb_detection, queue_size=1)
         self.sub_tag_id = rospy.Subscriber(f"/{self.veh_name}/tag_id", Int32, self.cb_tag_id, queue_size=1)
-        
+        self.sub_shutdown_commands = rospy.Subscriber(f'/{self.veh_name}/number_detection_node/shutdown_cmd', String, self.shutdown, queue_size = 1)
+
         self.log("Initialized")
 
     # Start of callback functions
@@ -413,6 +414,23 @@ class RobotFollowerNode(DTROS):
             car_control_msg.v - 0.0
             car_control_msg.omega = 0.0
             self.pub_car_cmd.publish(car_control_msg)
+        
+    def shutdown(self, msg):
+        if msg=="shutdown":
+            motor_cmd = WheelsCmdStamped()
+            motor_cmd.header.stamp = rospy.Time.now()
+            motor_cmd.vel_left = 0.0
+            motor_cmd.vel_right = 0.0
+            self.pub_motor_commands.publish(motor_cmd)
+            car_control_msg = Twist2DStamped()
+            car_control_msg.header.stamp = rospy.Time.now()
+            car_control_msg.v - 0.0
+            car_control_msg.omega = 0.0
+            self.pub_car_cmd.publish(car_control_msg)
+            time.sleep(2)
+
+            rospy.signal_shutdown("Robot circuit Node Shutdown command received")
+            exit()
 
 if __name__ == '__main__':
     node = RobotFollowerNode(node_name='robot_follower_node')

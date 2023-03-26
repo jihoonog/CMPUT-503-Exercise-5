@@ -51,41 +51,6 @@ from CNN import Net
 VERBOSE = 0
 SIM = False
 
-class MLP(nn.Module):
-    """
-    From the Multilayer Perception (MLP) tutorial notebook
-    """
-    def __init__(self, input_dim, output_dim):
-        super().__init__()
-
-        self.input_fc = nn.Linear(input_dim, 250)
-        self.hidden_fc = nn.Linear(250, 100)
-        self.output_fc = nn.Linear(100, output_dim)
-
-    def forward(self, x):
-
-        # x = [batch size, height, width]
-
-        batch_size = x.shape[0]
-
-        x = x.view(batch_size, -1)
-
-        # x = [batch size, height * width]
-
-        h_1 = F.relu(self.input_fc(x))
-        h_1 = F.dropout(h_1, p=0.1)
-        # h_1 = [batch size, 250]
-
-        h_2 = F.relu(self.hidden_fc(h_1))
-        h_2 = F.dropout(h_2, p=0.1)
-        # h_2 = [batch size, 100]
-
-        y_pred = self.output_fc(h_2)
-
-        # y_pred = [batch size, output dim]
-
-        return y_pred, h_2
-
 
 class NumberDetectionNode(DTROS):
     """
@@ -138,6 +103,8 @@ class NumberDetectionNode(DTROS):
                 # Publishers
         ## Publish commands to the motors
         self.pub_motor_commands = rospy.Publisher(f'/{self.veh_name}/wheels_driver_node/wheels_cmd', WheelsCmdStamped, queue_size=1)
+        self.pub_shutdown_commands = rospy.Publisher(f'/{self.veh_name}/number_detection_node/shutdown_cmd', String, queue_size=1)
+        #self.pub_motor_commands = rospy.Publisher(f'/state_control_node/command', String, queue_size=1)
         self.pub_car_cmd = rospy.Publisher(f'/{self.veh_name}/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1, dt_topic_type=TopicType.CONTROL)
 
         self.log("Initialized")
@@ -183,11 +150,18 @@ class NumberDetectionNode(DTROS):
         
         # processed_image = self.augmenter.process_image(raw_image)
 
-        if len(list(self.figure_decision_queue)) == 10:
+        if len(self.figure_decision_queue) == 10:
             print(self.figure_decision_queue)
-            self.shutdown()
+            self.pub_shutdown_commands.publish("shutdown")
+
+
+
             time.sleep(2)
-            exit()
+            rospy.signal_shutdown("number_detection Node Shutdown command received")
+
+            #self.shutdown()
+            #time.sleep(2)
+            #exit()
         
 
             
@@ -206,10 +180,11 @@ class NumberDetectionNode(DTROS):
         cv2.rectangle(raw_image, (x,y), (x + w, y + h), (0,255,0), 2)
 
         number = raw_image[y:y+h, x:x+w]
-        if number is None or mask is None or w<50 or h < 50:
+        if number is None or mask is None or w<70 or h < 70 or w>300 or h>300:
             self.pub_processed_image(copy_raw, self.pub_number_bb)
             return
-        black_max = np.array([100,100,100])
+        black_max = np.array([80,80,80])
+        #black_max = np.array([100,100,100])
         black_min = np.array([0,0,0])
         number_mask = cv2.inRange(number, black_min, black_max)
         number_mask = cv2.resize(number_mask, (28,28))
@@ -225,14 +200,9 @@ class NumberDetectionNode(DTROS):
         #print("res_vector",res_vector)
         figure_decision = res_vector.argmax(1, keepdim=True).item()
 
-        # The old model can not compare 3/5 and 1/7 well, so we use a new model to do that.
-        if figure_decision == 1:
+        # The old model has some confusion in detecting 7 and 5, so we use a new model to do that.
+        if figure_decision in [1,3,5,7]:
             figure_decision = self.new_model(input_tensor).argmax(1, keepdim=True).item()
-
-        elif figure_decision == 3 or figure_decision == 5:
-            figure_decision = self.new_model(input_tensor).argmax(1, keepdim=True).item()
-
-
 
         if self.apriltag_exist != -1:
             if self.apriltag_exist in list(self.tag_history_list.keys()):

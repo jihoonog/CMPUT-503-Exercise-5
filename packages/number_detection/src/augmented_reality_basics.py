@@ -38,7 +38,7 @@ class Augmenter():
 
         pixel = image_point[0:2]
         pixel = np.round(pixel).astype(int)
-        print (pixel, image_point)
+
         return pixel
 
     def render_segments(self, points, img, segments):

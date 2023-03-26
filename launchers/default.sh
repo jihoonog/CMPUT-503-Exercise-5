@@ -14,7 +14,8 @@ dt-launchfile-init
 
 # launching app
 dt-exec roslaunch number_detection number_detection_node.launch
-#dt-exec roslaunch duckiebot_circuit duckiebot_circuit_node.launch
+sleep 3
+dt-exec roslaunch duckiebot_circuit duckiebot_circuit_node.launch
 
 # ----------------------------------------------------------------------------
 # YOUR CODE ABOVE THIS LINE

@@ -83,6 +83,7 @@ class AprilTagNode(DTROS):
         self.buffer = tf2_ros.Buffer()
 
         self.buffer_listener = tf2_ros.TransformListener(self.buffer)
+        self.sub_shutdown_commands = rospy.Subscriber(f'/{self.veh}/number_detection_node/shutdown_cmd', String, self.shutdown, queue_size = 1)
         
 
 
@@ -203,6 +204,11 @@ class AprilTagNode(DTROS):
 
         self.tmp_broadcaster.sendTransform(static_transformStamped)
 
+    def shutdown(self, msg):
+
+        if msg.data=="shutdown":
+            rospy.signal_shutdown("Apriltag detection Node Shutdown command received")
+            exit()
 
 
     def project(self, msg):
