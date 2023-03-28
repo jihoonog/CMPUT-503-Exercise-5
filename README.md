@@ -1,6 +1,6 @@
-# Exercise 4
+# Exercise 5
 
-For this exercise we were tasked on implementing a following behaviour on our Duckiebot where it will follow a leader bot if it detects one around the Duckietown environment. This involves combining different components from previous exercises such as lane following, Apriltag detection, and custom LED emitter patterns. With new components like vehicle detection and distance calculation. All of these components are fed into a single node that handles the robot and lane following behaviour.
+For this exercise we were tasked on implementing a machine learning model that will recongize numbers attached to the AprilTags in the Duckietown environment and stop once all 10 numbers have been correctly identified. The robot will drive autonomusly in Duckietown until all 10 numbers are found.
 
 ## Running the demo
 
